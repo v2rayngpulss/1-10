@@ -46,6 +46,22 @@ void *send_packets(void *arg) {
         pthread_exit(NULL);
     }
 
+    // تنظیم گزینه IP_HDRINCL برای ارسال بسته‌های خام
+    int optval = 1;
+    if (setsockopt(raw_socket, IPPROTO_IP, IP_HDRINCL, &optval, sizeof(optval)) < 0) {
+        perror("خطا در تنظیم IP_HDRINCL");
+        close(raw_socket);
+        pthread_exit(NULL);
+    }
+
+    // افزایش سایز بافر ارسال برای جلوگیری از خطای "No buffer space available"
+    int sndbuf_size = 1024 * 1024; // 1MB
+    if (setsockopt(raw_socket, SOL_SOCKET, SO_SNDBUF, &sndbuf_size, sizeof(sndbuf_size)) < 0) {
+        perror("خطا در تنظیم SO_SNDBUF");
+        close(raw_socket);
+        pthread_exit(NULL);
+    }
+
     char packet[BUFFER_SIZE];
     memset(packet, 0, BUFFER_SIZE);
 
@@ -99,7 +115,12 @@ void *send_packets(void *arg) {
 
             if (sendto(raw_socket, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
                 perror("خطا در ارسال بسته");
+            } else {
+                printf("بسته TCP به %s ارسال شد.\n", target_ips[i]);
             }
+
+            // اضافه کردن تاخیر برای جلوگیری از فشار بیش از حد به سیستم
+            usleep(10000); // 10 میلی‌ثانیه تاخیر
         }
     }
 
